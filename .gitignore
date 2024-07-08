@@ -1,0 +1,5 @@
+## NESOY Ignore File ##
+
+*.egg-info
+*.pyc
+__pycache__/
