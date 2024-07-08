@@ -1,0 +1,2 @@
+stable_baselines3<3.0,>=2.3.0
+sb3_contrib<3.0,>=2.3.0
