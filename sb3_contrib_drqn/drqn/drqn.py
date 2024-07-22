@@ -53,7 +53,7 @@ class DRQN(DQN):
         policy_kwargs: Optional[Dict[str, Any]] = None,
         verbose: int = 0,
         seed: Optional[int] = None,
-        device: Union[th.device, str] = th.device("mps"),
+        device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
     ):
         super().__init__(
@@ -108,7 +108,6 @@ class DRQN(DQN):
             )
         
         actions = self.policy._predict(observation, state, deterministic)
-        # print("[DRQN] policy predicted actions : ", actions)
         return actions.cpu().numpy(), state
 
     def learn(
@@ -228,12 +227,14 @@ class DRQN(DQN):
         if self.num_timesteps < learning_starts and not (self.use_sde and self.use_sde_at_warmup):
             # Warmup phase
             unscaled_action = np.array([self.action_space.sample() for _ in range(n_envs)])
+            # print("[DRQN] warmup phase unscale_action : ", unscaled_action, ",type : ", type(unscaled_action))
         else:
             # Note: when using continuous actions,
             # we assume that the policy uses tanh to scale the action
             # We use non-deterministic action in the case of SAC, for TD3, it does not matter
             assert self._last_obs is not None, "self._last_obs was not set"
             unscaled_action, self.lstm_states = self.predict(self._last_obs, state=self.lstm_states.hidden_state, deterministic=False)
+            # print("[DRQN] predict unscale_action : ", unscaled_action, ",type : ", type(unscaled_action))
 
         # Rescale the action from [low, high] to [-1, 1]
         if isinstance(self.action_space, spaces.Box):

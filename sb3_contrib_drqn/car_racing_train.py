@@ -12,7 +12,12 @@ from drqn.extractors import CustomRecurrentFeaturesExtractor
 
 
 DEVICE=th.device("mps")
-
+if th.cuda.is_available():
+    DEVICE = th.device("cuda")
+elif th.backends.mps.is_availeble():
+    DEVICE = th.device("mps")
+else:
+    DEVICE = th.device("cpu")
 ## set environment
 n_envs = 20
 if n_envs > 1:
