@@ -7,10 +7,22 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import OccupancyGrid
 from sb3_contrib_drqn.nav.reward_functions import RewardHandler
 
+Actions = [
+    [-1, -1],
+    [-1, 0],
+    [-1, 1],
+    [0, -1],
+    [0, 0],
+    [0, 1],
+    [1, -1],
+    [1, 0],
+    [1, 1],
+]
+
 class SimulatorHandler:
     def __init__(self, ns: str):
         self.ns = ns
-        rospy.init_node("%s/simulator_handler_node"%ns)
+        rospy.init_node("imulator_handler_node")
         # subscriber for observations
         self.subs = []
         self.subs.append(rospy.Subscriber("data_map", OccupancyGrid, self.data_map_callback))
@@ -22,20 +34,33 @@ class SimulatorHandler:
         
         # variables
         self.lin_acc = 0.2
-        self.data_map = deque(max_len=2)
+        self.data_map = deque(maxlen=2)
         self.current_velocity = Twist()
         
         # reward handler
         self.rh = RewardHandler()
         
     def send_action(self, action: np.ndarray):
+        ## action setup 
+        ## 0 ~ 9, 
+        # 0 : {lin acc : -1, ang vel : -1}, 
+        # 1 : {lin acc : -1, ang vel :  0}, 
+        # 2 : {lin acc : -1, ang vel :  1}, 
+        # 3 : {lin acc :  0, ang vel : -1}, 
+        # 4 : {lin acc :  0, ang vel :  0}, 
+        # 5 : {lin acc :  0, ang vel :  1}, 
+        # 6 : {lin acc :  1, ang vel : -1}, 
+        # 7 : {lin acc :  1, ang vel :  0}, 
+        # 8 : {lin acc :  1, ang vel :  1}, 
+        # 9 : break
+ 
         def action_parser(action):
-            if action[2] == 1: # break
+            if action == 9: # break
                 return Twist()
-            lin_vel = (action[0] * self.lin_acc) + self.current_velocity.linear.x
+            lin_vel = (Actions[action][0] * self.lin_acc) + self.current_velocity.linear.x
             twist = Twist()
             twist.linear.x = lin_vel
-            twist.angular.z = action[1]
+            twist.angular.z = Actions[action][1]
             return twist
         vel = action_parser(action)
         self.pubs["cmd_vel"].publish(vel)
@@ -50,7 +75,7 @@ class SimulatorHandler:
             obs = self.data_map.pop()
             return obs
         except IndexError:
-            rospy.logwarn("[SimulatorHandler] dm queue is empty..")
+            # rospy.logwarn("[SimulatorHandler] dm queue is empty..")
             return np.zeros((200, 200))
         except Exception:
             rospy.logwarn("[SimulatorHandler] some exception, %s"%traceback.format_exc())

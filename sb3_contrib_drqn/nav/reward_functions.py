@@ -7,7 +7,7 @@ def get_mask(targets):
     mask = 0
     for target in targets:
         mask |= (1 << target)
-    return mask
+    return int(mask)
 
 class RewardHandler:
     total_reward: float = 0.0
@@ -43,7 +43,8 @@ class RewardHandler:
     def collision_check(self, obs):
         reward = 0.0
         mask = get_mask([self.obstacle_value, self.footprint_value])
-        if np.any((obs & mask) == mask):
+        obs = obs.astype(int)
+        if np.any(np.bitwise_and(obs, mask) == mask):
             reward = self.config.reward_panalty.collision
             return reward, True, {"result_condition": ResultCondition.COLLISION}
         return reward, False, {}
@@ -55,7 +56,8 @@ class RewardHandler:
     def goal_reached(self, obs):
         reward = 0.0
         mask = get_mask([self.goal_value])
-        goal_indices = np.where((obs & mask) == mask)
+        obs = obs.astype(int)
+        goal_indices = np.where(np.bitwise_and(obs, mask) == mask)
         if not len(goal_indices[0]):
             return reward, False, {}
         cell_dist = math.hypot(goal_indices[0] - self.center[0], goal_indices[1] - self.center[1])
