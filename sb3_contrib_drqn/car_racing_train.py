@@ -59,7 +59,7 @@ model = DRQN(
 )
 
 model.learn(total_timesteps=1_000_000, tb_log_name="DRQN", log_interval=1)
-model.save("drqn_carracing")
+model.save("weights/drqn_carracing")
 print("learning time : %s"%(time.time() - st))
 del model  # remove to demonstrate saving and loading
 env.close()

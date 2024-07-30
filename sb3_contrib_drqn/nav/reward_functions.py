@@ -1,4 +1,5 @@
 import math
+import rospy
 import numpy as np
 from sb3_contrib_drqn.nav.conditions import ResultCondition
 from sb3_contrib_drqn.nav.data_map_config import DMConfig
@@ -46,6 +47,7 @@ class RewardHandler:
         obs = obs.astype(int)
         if np.any(np.bitwise_and(obs, mask) == mask):
             reward = self.config.reward_panalty.collision
+            rospy.logwarn("[CollisionCheck] collision, done")
             return reward, True, {"result_condition": ResultCondition.COLLISION}
         return reward, False, {}
 

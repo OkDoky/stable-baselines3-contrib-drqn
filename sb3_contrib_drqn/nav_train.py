@@ -1,5 +1,6 @@
 import time
 import gymnasium as gym
+import rospy
 import torch as th
 from stable_baselines3.common.monitor import Monitor
 
@@ -19,9 +20,8 @@ elif th.backends.mps.is_availeble():
 else:
     DEVICE = th.device("cpu")
 ## set environment
-n_envs = 2
+n_envs = int(rospy.get_param("n_envs", 2))
 env_kwargs = {
-    "ns": "r1",
     "render_mode": "rgb_array",
 }
 if n_envs > 1:
@@ -62,8 +62,8 @@ model = DRQN(
     device=DEVICE,
 )
 
-model.learn(total_timesteps=10_000, tb_log_name="DRQN", log_interval=1)
-model.save("drqn_data_map")
+model.learn(total_timesteps=1_000_000, tb_log_name="DRQN", log_interval=1)
+model.save("weights/drqn_data_map")
 print("learning time : %s"%(time.time() - st))
 del model  # remove to demonstrate saving and loading
 env.close()

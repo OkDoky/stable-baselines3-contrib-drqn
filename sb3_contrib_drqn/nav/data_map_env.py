@@ -1,9 +1,12 @@
 import time
 import gymnasium as gym
 import numpy as np
+import rospy
 from gymnasium import spaces
 from sb3_contrib_drqn.nav.conditions import ResultCondition
 from sb3_contrib_drqn.nav.simulator_connector import SimulatorHandler
+from sb3_contrib_drqn.nav.manager.robot_manager import RobotManager
+from sb3_contrib_drqn.nav.manager.map_manager import MapManager
 
 class DataMapEnv(gym.Env):
     """Custom Environment that follows gym interface."""
@@ -39,6 +42,7 @@ class DataMapEnv(gym.Env):
 
     def step(self, action):
         start_time = time.time()
+        self.simulator.step_world()
         self.simulator.send_action(action)
         self._steps_current_episode += 1
         obs, reward, done, info = self.simulator.get_transitions()
@@ -53,6 +57,7 @@ class DataMapEnv(gym.Env):
         self.mean_reward[0] += reward
         
         if done:
+            rospy.logwarn("[%s Env] step : %d"%(self.ns, self._steps_current_episode))
             if sum(self.result_history) >= self.log_history_lenght:
                 mean_reward = self.mean_reward[0] / self.mean_reward[1]
                 diff = round(mean_reward - self.last_mean_reward, 3)
@@ -68,6 +73,7 @@ class DataMapEnv(gym.Env):
             
             self.result_history[int(info["result_condition"])] += 1
             self._steps_current_episode = 0
+            self.reset()
         self.step_time[0] += time.time() - start_time            
         return obs, reward, done, None, info
 

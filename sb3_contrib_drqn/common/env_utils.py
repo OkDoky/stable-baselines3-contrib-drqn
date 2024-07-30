@@ -1,5 +1,6 @@
 from typing import Union, Callable, Optional, Dict, Type, Any
 import gymnasium as gym
+import rospy
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv
 
@@ -55,9 +56,10 @@ def make_vec_env(
 
             if isinstance(env_id, str):
                 # if the render mode was not specified, we set it to `rgb_array` as default.
-                kwargs = {"render_mode": "rgb_array"}
+                kwargs = {"ns": "r%d"%(rank+1)}
                 kwargs.update(env_kwargs)
                 try:
+                    rospy.logwarn("[MakeEnv] kwargs : %s"%kwargs)
                     env = gym.make(env_id, **kwargs)  # type: ignore[arg-type]
                 except TypeError:
                     env = gym.make(env_id, **env_kwargs)
@@ -87,7 +89,6 @@ def make_vec_env(
     if vec_env_cls is None:
         # Default: use a DummyVecEnv
         vec_env_cls = DummyVecEnv
-
     vec_env = vec_env_cls([make_env(i + start_index) for i in range(n_envs)], **vec_env_kwargs)
     # Prepare the seeds for the first reset
     vec_env.seed(seed)

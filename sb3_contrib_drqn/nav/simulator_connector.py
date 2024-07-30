@@ -3,9 +3,27 @@ from collections import deque
 import traceback
 import rospy
 import numpy as np
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, TwistStamped
 from nav_msgs.msg import OccupancyGrid
+from flatland_msgs.msg import StepWorld
+from std_srvs.srv import Empty
+from map_distance_server.srv import GetDistanceMap
+
 from sb3_contrib_drqn.nav.reward_functions import RewardHandler
+from sb3_contrib_drqn.nav.manager.map_manager import MapManager
+from sb3_contrib_drqn.nav.manager.robot_manager import RobotManager
+
+Actions = [
+    [-1, -1],
+    [-1, 0],
+    [-1, 1],
+    [0, -1],
+    [0, 0],
+    [0, 1],
+    [1, -1],
+    [1, 0],
+    [1, 1],
+]
 
 Actions = [
     [-1, -1],
@@ -22,15 +40,20 @@ Actions = [
 class SimulatorHandler:
     def __init__(self, ns: str):
         self.ns = ns
-        rospy.init_node("imulator_handler_node")
+        rospy.init_node("imulator_handler_node", anonymous=True)
         # subscriber for observations
         self.subs = []
-        self.subs.append(rospy.Subscriber("data_map", OccupancyGrid, self.data_map_callback))
-        self.subs.append(rospy.Subscriber("feedback_vel", Twist, self.feedback_callback))
+        self.subs.append(rospy.Subscriber("%s/dmvm/combined_data_map"%ns, OccupancyGrid, self.data_map_callback))
+        self.subs.append(rospy.Subscriber("%s/feedback_vel"%ns, TwistStamped, self.feedback_callback))
         
         # publisher for action
         self.pubs = {}
-        self.pubs["cmd_vel"] = rospy.Publisher("cmd_vel", Twist, queue_size=1)
+        self.pubs["cmd_vel"] = rospy.Publisher("%s/cmd_vel"%ns, Twist, queue_size=1)
+
+        # for step world
+        self.step_time = rospy.get_param("step_time", 0.1)
+        self.clients = {}
+        self.clients["step_world"] = rospy.ServiceProxy("%s/step_world"%ns, Empty, persistent=True)
         
         # variables
         self.lin_acc = 0.2
@@ -39,6 +62,12 @@ class SimulatorHandler:
         
         # reward handler
         self.rh = RewardHandler()
+
+        rospy.wait_for_service("%s/distance_map"%ns)
+        service_client_get_map = rospy.ServiceProxy("%s/distance_map"%ns, GetDistanceMap)
+        map_response = service_client_get_map()
+        map_manager = MapManager(map_response, ns)
+        self.robot_manager = RobotManager(ns, "burger", map_manager)
         
     def send_action(self, action: np.ndarray):
         ## action setup 
@@ -93,18 +122,16 @@ class SimulatorHandler:
         self.data_map.append(np.array(msg.data, dtype=np.int8).reshape(msg.info.height, msg.info.width))
 
     def feedback_callback(self, msg):
-        self.current_velocity = msg
+        self.current_velocity = msg.twist
     
     def _stop_action(self):
         self.pubs["cmd_vel"].publish(Twist())
     
     def _reset_world(self):
-        """
-        reset robot position in gazebo, amcl
-        random position for robot
-        """
-        pass
+        self.robot_manager.reset()
     
     def _reset_reward(self):
         self.rh.reset_rewards()
     
+    def step_world(self):
+        self.clients["step_world"]()
