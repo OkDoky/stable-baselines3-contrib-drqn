@@ -25,6 +25,18 @@ Actions = [
     [1, 1],
 ]
 
+Actions = [
+    [-1, -1],
+    [-1, 0],
+    [-1, 1],
+    [0, -1],
+    [0, 0],
+    [0, 1],
+    [1, -1],
+    [1, 0],
+    [1, 1],
+]
+
 class SimulatorHandler:
     def __init__(self, ns: str):
         self.ns = ns
