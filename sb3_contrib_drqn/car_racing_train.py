@@ -12,7 +12,12 @@ from drqn.extractors import CustomRecurrentFeaturesExtractor
 
 
 DEVICE=th.device("mps")
-
+if th.cuda.is_available():
+    DEVICE = th.device("cuda")
+elif th.backends.mps.is_availeble():
+    DEVICE = th.device("mps")
+else:
+    DEVICE = th.device("cpu")
 ## set environment
 n_envs = 20
 if n_envs > 1:
@@ -54,7 +59,7 @@ model = DRQN(
 )
 
 model.learn(total_timesteps=1_000_000, tb_log_name="DRQN", log_interval=1)
-model.save("drqn_carracing")
+model.save("weights/drqn_carracing")
 print("learning time : %s"%(time.time() - st))
 del model  # remove to demonstrate saving and loading
 env.close()
