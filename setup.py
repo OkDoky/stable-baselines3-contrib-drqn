@@ -65,8 +65,16 @@ setup(
     packages=[package for package in find_packages() if package.startswith("sb3_contrib_drqn")],
     package_data={"sb3_contrib_drqn": ["py.typed", "version.txt"]},
     install_requires=[
-        "stable_baselines3>=2.3.0,<3.0",
-        "sb3_contrib>=2.3.0,<3.0"
+        "stable_baselines3==2.3.0",
+        "sb3_contrib==2.3.0",
+        "box2d-py==2.3.5",
+        "gymnasium==0.29.1",
+        "numpy==1.26.4",
+        "pygame==2.6.0",
+        "scikit-image==0.21.0",
+        "swig==4.*",
+        "tensorboard==2.13.0",
+        "torch==2.3.1",
     ],
     description="Added Contrib package of Stable Baselines3 Contrib, experimental code, only for drqn",
     author="OkDoky",
@@ -78,7 +86,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     version=__version__,
-    python_requires=">=3.8",
+    python_requires="==3.10.4",
     # PyPI package information.
     project_urls={
         "Code": "https://github.com/OkDoky/stable-baselines3-contrib-drqn",
@@ -91,9 +99,6 @@ setup(
     },
     classifiers=[
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
     ],
 )
