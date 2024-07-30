@@ -1,7 +1,7 @@
 
-from enum import Enum
+from enum import IntEnum
 
-class ResultCondition(Enum):
+class ResultCondition(IntEnum):
     SUCCESS = 0
     COLLISION = 1
     TIMEOUT = 2
