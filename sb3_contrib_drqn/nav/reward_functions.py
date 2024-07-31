@@ -1,5 +1,6 @@
 import math
 import rospy
+import copy
 import numpy as np
 from sb3_contrib_drqn.nav.conditions import ResultCondition
 from sb3_contrib_drqn.nav.data_map_config import DMConfig
@@ -17,6 +18,7 @@ class RewardHandler:
         self.function_list = [self.step_count, 
                               self.collision_check, 
                               self.goal_reached, 
+                              self.approach_goal,
                             #   self.safety_check, 
                             #   self.cross_track_error_check,
                               ]
@@ -26,6 +28,8 @@ class RewardHandler:
         self.path_value = self.config.data_map_infos.path
         self.goal_value = self.config.data_map_infos.goal
         self.center = [cx, cy]
+        self.last_cell_dist = 5.0
+        self.current_cell_dist = 5.0
         
     def get_rewards(self, obs):
         rewards = 0.0
@@ -40,6 +44,7 @@ class RewardHandler:
     
     def reset_rewards(self):
         self.total_reward = 0.0
+        self.last_cell_dist = 5.0
     
     def collision_check(self, obs):
         reward = 0.0
@@ -63,9 +68,17 @@ class RewardHandler:
         if not len(goal_indices[0]):
             return reward, False, {}
         cell_dist = math.hypot(goal_indices[0] - self.center[0], goal_indices[1] - self.center[1])
+        self.current_cell_dist = cell_dist
         if cell_dist < self.config.data_map_infos.goal_threshold:
             reward = self.config.reward_panalty.goal
             return reward, True, {"result_condition": ResultCondition.SUCCESS}
+        return reward, False, {}
+    
+    def approach_goal(self, obs):
+        reward = 0.0
+        if self.current_cell_dist < self.last_cell_dist:
+            reward = self.last_cell_dist - self.current_cell_dist
+        self.last_cell_dist = copy.copy(self.current_cell_dist)
         return reward, False, {}
 
     def safety_check(self, obs):
