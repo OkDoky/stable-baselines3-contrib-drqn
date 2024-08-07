@@ -4,13 +4,13 @@ import rospy
 import torch as th
 from stable_baselines3.common.monitor import Monitor
 
-from sb3_contrib_drqn.drqn.drqn import DRQN
-from sb3_contrib_drqn.drqn.policies import RecurrentDQNPolicy
+from stable_baselines3.dqn.dqn import DQN
+from stable_baselines3.dqn.policies import DQNPolicy
+# from sb3_contrib_drqn.drqn.policies import RecurrentDQNPolicy
 from sb3_contrib_drqn.drqn.extractors import CustomRecurrentFeaturesExtractor
 from sb3_contrib_drqn.common.buffers import RecurrentReplayBuffer
-import sb3_contrib_drqn.nav
 from sb3_contrib_drqn.common.env_utils import make_vec_env
-
+import  sb3_contrib_drqn.nav
 
 DEVICE=th.device("mps")
 if th.cuda.is_available():
@@ -39,8 +39,6 @@ hidden_size = 16
 policy_kwargs = dict(
     features_extractor_class=CustomRecurrentFeaturesExtractor,
     features_extractor_kwargs=dict(feature_dim=5),
-    n_lstm_layers=num_hidden_layers,
-    lstm_hidden_size=hidden_size,
 )
 
 buffer_kwargs = dict(
@@ -49,8 +47,8 @@ buffer_kwargs = dict(
     max_episode_buffer_size=1,
 )
 st = time.time()
-model = DRQN(
-    policy=RecurrentDQNPolicy, 
+model = DQN(
+    policy=DQNPolicy, 
     env=env, 
     buffer_size=buffer_size, 
     learning_starts=200,
