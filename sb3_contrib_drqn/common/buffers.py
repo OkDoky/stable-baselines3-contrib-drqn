@@ -1,6 +1,8 @@
 import sys
 from collections import deque
 import random
+from copy import deepcopy
+import rospy
 from typing import Union, Tuple, Optional, Any, List, Dict
 import numpy as np
 import torch as th
@@ -40,17 +42,27 @@ class RecurrentReplayBuffer(ReplayBuffer):
     ) -> None:
         """Extend the add method to handle multiple environments."""
         for env_idx in range(self.n_envs):
-            self.current_episodes[env_idx].append((obs[env_idx], action[env_idx], reward[env_idx], next_obs[env_idx], done[env_idx]))
+            ## current_step_transition : tuple(obs, act, rwd, next_obs, done)
+            current_step_transition = (obs[env_idx], 
+                                       action[env_idx], 
+                                       reward[env_idx], 
+                                       next_obs[env_idx], 
+                                       done[env_idx])
+            self.current_episodes[env_idx].append(current_step_transition)
 
             if done[env_idx]:
                 # When episode for a particular env is done, transfer it to the episode buffer
-                self.episode_buffers.add_episode(self.current_episodes[env_idx].copy())
+                self.episode_buffers.add_episode(deepcopy(self.current_episodes[env_idx]))
                 self.current_episodes[env_idx] = []
 
     def sample_episodes(self, batch_size):
         """Sample a batch of episodes across all environments."""
         return self.episode_buffers.sample(batch_size, self.sequence_length)
-
+    
+    def sample_episode(self, batch_size):
+        """Sample a batch of episodes across all environments."""
+        return self.episode_buffers.sample_episode(batch_size)
+    
     def get_seq_len(self):
         return self.sequence_length
         
@@ -61,7 +73,11 @@ class EpisodeBuffer:
         self._is_full = False
 
     def add_episode(self, episode):
+        ## buffers : deque(episode)
+        ## episode : List[tuple(step transitions)]
         self.buffers.append(episode)
+        rospy.logwarn("[Buffers] add episode, episode first index(actions) : %s, type : %s"%(type(self.buffers[-1][0][1]), self.buffers[-1][0][1]))
+        self._is_full = bool(len(self.buffers) == self.buffers.maxlen)
         
     def sample(self, batch_size, sequence_length):
         """Sample a batch of episodes, ensuring each is of a fixed sequence length."""
@@ -72,20 +88,45 @@ class EpisodeBuffer:
             if len(self.buffers[env_idx]) == 0:
                 continue
             # Choose a random episode from the environment
-            episode_idx = np.random.randint(len(self.buffers[env_idx]))
-            episode = self.buffers[env_idx][episode_idx]
+            episode_length = len(self.buffers[env_idx])
+            # episode_idx = np.random.randint(len(self.buffers[env_idx]))  # int
+            # rospy.logerr("[Buffers] episode to list? %s -> %s"%(type(self.buffers[env_idx][episode_idx]), type(list(self.buffers[env_idx][episode_idx]))))
+            
             # Trim or pad the episode to the required sequence length
-            if len(episode) > sequence_length:
-                start_idx = np.random.randint(len(episode) - sequence_length + 1)
-                episode = episode[start_idx:start_idx + sequence_length]
-            elif len(episode) < sequence_length:
-                padding = [episode[0]] * (sequence_length - len(episode))  # padding with the first step
+            if episode_length > sequence_length:
+                start_idx = np.random.randint(episode_length - sequence_length + 1)
+                episode = self.buffers[env_idx][start_idx:start_idx + sequence_length]
+            elif episode_length < sequence_length:
+                episode = self.buffers[env_idx]
+                padding = [self.buffers[env_idx][0]] * (sequence_length - episode_length)  # padding with the first step
                 episode = padding + episode
+            # rospy.logerr("[Buffers] episode : %s, %s"%(len(episode), episode))
+            # rospy.logerr("[Buffers] types : %s"%([type(t) for t in episode]))
             sampled_episodes.append(episode)
         return sampled_episodes
+
+    def sample_episode(self, batch_size):
+        """Sample a batch of episodes, ensuring each is of a fixed sequence length."""
+        sampled_episodes = []
+        env_idx = np.random.randint(len(self.buffers))
+        episode_length = len(self.buffers[env_idx])
+        
+        # Trim or pad the episode to the required sequence length
+        if episode_length > batch_size:
+            start_idx = np.random.randint(episode_length - batch_size + 1)
+            episode = self.buffers[env_idx][start_idx:start_idx + batch_size]
+        elif episode_length < batch_size:
+            episode = self.buffers[env_idx]
+            padding = [self.buffers[env_idx][0]] * (batch_size - episode_length)  # padding with the first step
+            episode = padding + episode
+        # rospy.logerr("[Buffers] episode : %s, %s"%(len(episode), episode))
+        # rospy.logerr("[Buffers] types : %s"%([type(t) for t in episode]))
+        # sampled_episodes.append(episode)
+        return episode
 
     def __len__(self) -> int:
         return len(self.buffers)
     
     def is_full(self) -> bool:
+        rospy.logwarn("[Buffers] epi buf is full %s"%self._is_full)
         return self._is_full
