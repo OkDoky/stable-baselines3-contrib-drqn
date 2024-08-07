@@ -3,8 +3,10 @@ import torch.nn as nn
 import gymnasium as gym
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
-from sb3_contrib_drqn.common.type_aliases import RNNStates
-from skimage.color import rgb2gray
+import rospy
+import numpy as np
+# from sb3_contrib_drqn.common.type_aliases import RNNStates
+# from skimage.color import rgb2gray
 
 class CustomRecurrentFeaturesExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space, feature_dim: int = 5, hidden_space: int = 64):
@@ -35,7 +37,7 @@ class CustomRecurrentFeaturesExtractor(BaseFeaturesExtractor):
         self.img_trans_weights = th.tensor([0.299, 0.587, 0.114], device=self.device).view(1, 3, 1, 1)
 
     def forward(self, x):
-        x = self.rgb2gray(x)
+        # x = self.rgb2gray(x)
         x = th.relu(self.conv1(x))
         x = th.relu(self.conv2(x))
         x = th.relu(self.conv3(x))
@@ -45,6 +47,9 @@ class CustomRecurrentFeaturesExtractor(BaseFeaturesExtractor):
         return x
     
     def rgb2gray(self, rgb):
-        
+        if isinstance(rgb, np.ndarray):
+            rgb = th.from_numpy(rgb)
+        if rgb.shape[1] == 1:
+            return rgb  ## already gray scale image..
         gray = th.sum(rgb * self.img_trans_weights, dim=1, keepdim=True)
         return gray

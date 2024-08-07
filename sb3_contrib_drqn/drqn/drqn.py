@@ -1,7 +1,12 @@
 from __future__ import annotations
 from typing import Any, Union, Optional, Tuple, ClassVar, Dict, Type, TypeVar
+from collections import deque
+from copy import deepcopy
 
 import numpy as np
+import sys
+import time
+import rospy
 from gymnasium import spaces
 import torch as th
 from torch.nn import functional as F
@@ -11,12 +16,13 @@ from stable_baselines3.common.vec_env import VecEnv
 from stable_baselines3.common.noise import ActionNoise
 from stable_baselines3.common.policies import BasePolicy
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule, TrainFreq, RolloutReturn, TrainFrequencyUnit
-from stable_baselines3.common.utils import should_collect_more_steps
+from stable_baselines3.common.utils import should_collect_more_steps, safe_mean
 from stable_baselines3.common.callbacks import BaseCallback
 
 from sb3_contrib_drqn.drqn.policies import RecurrentDQNPolicy, RecurrentQNetwork
 from sb3_contrib_drqn.common.buffers import RecurrentReplayBuffer
 from sb3_contrib_drqn.common.type_aliases import RNNStates
+from sb3_contrib_drqn.common.utils import safe_n_mean
 
 SelfDRQN = TypeVar("SelfDRQN", bound="DRQN")
 
@@ -24,8 +30,8 @@ class DRQN(DQN):
     policy_aliases: ClassVar[Dict[str, Type[BasePolicy]]] = {
         "RecurrentDQNPolicy": RecurrentDQNPolicy,
     }
-    q_net: RecurrentQNetwork
-    q_net_target: RecurrentQNetwork
+    # q_net: RecurrentQNetwork
+    # q_net_target: RecurrentQNetwork
     policy: RecurrentDQNPolicy
     
     def __init__(
@@ -85,6 +91,7 @@ class DRQN(DQN):
         )
         
         self.lstm_states = None
+        self.losses = 0.0
     
     def _setup_model(self) -> None:
         super()._setup_model()
@@ -97,7 +104,7 @@ class DRQN(DQN):
         observation = th.as_tensor(observation).float().to(self.device)
         
         if state is None:
-            state = self.policy.get_lstm_states(batch_size=1)
+            state = self.policy.get_lstm_states(batch_size=observation.shape[0])
         else:
             (h, c) = state
             state = RNNStates(
@@ -146,10 +153,12 @@ class DRQN(DQN):
             if not rollout.continue_training:
                 break
 
+            rospy.logwarn("[DRQN] epi buf size : %s, %s"%(len(self.replay_buffer.episode_buffers), self.replay_buffer.episode_buffers.is_full()))
             if self.num_timesteps > 0 and self.replay_buffer.episode_buffers.is_full():
                 # If no `gradient_steps` is specified,
                 # do as many gradients steps as steps performed during the rollout
                 gradient_steps = self.gradient_steps if self.gradient_steps >= 0 else rollout.episode_timesteps
+                # rospy.logerr("[DRQN] gradient steps : %s"%(gradient_steps))
                 # Special case when the user passes `gradient_steps=0`
                 if gradient_steps > 0:
                     self.train(batch_size=self.batch_size, gradient_steps=gradient_steps)
@@ -159,48 +168,48 @@ class DRQN(DQN):
         return self
     
     def train(self, gradient_steps: int, batch_size: int = 100) -> None:
+        rospy.logwarn("[DRQN] DRQN train function")
         # Switch to train mode (this affects batch norm / dropout)
         self.policy.set_training_mode(True)
         # Update learning rate according to schedule
         self._update_learning_rate(self.policy.optimizer)
 
         losses = []
-        seq_len = self.replay_buffer.get_seq_len()
         for _ in range(gradient_steps):
             # Sample episode buffer
-            samples = self.replay_buffer.sample_episodes(batch_size)  # type: ignore[union-attr]
-            
-            _observations = []
-            _actions = []
-            _rewards = []
-            _next_observations = []
-            _dones = []
+            # samples = self.replay_buffer.sample_episodes(batch_size)  # type: ignore[union-attr]
+            samples = self.replay_buffer.sample_episode(batch_size)
+            _observations, _actions, _rewards, _next_observations, _dones = [], [], [], [], []
             for i in range(self.batch_size):
-                for seq in range(seq_len):
-                    _observations.append(samples[i][seq][0])
-                    _actions.append(samples[i][seq][1])
-                    _rewards.append(samples[i][seq][2])
-                    _next_observations.append(samples[i][seq][3])
-                    _dones.append(samples[i][seq][4])
-            print("[DRQN] sampled obs shape : ")
-            _observations = th.FloatTensor(np.array(_observations).reshape(self.batch_size, seq_len, -1)).to(self.device)
-            _actions = th.LongTensor(np.array(_actions).reshape(self.batch_size, seq_len, -1)).to(self.device)
-            _rewards = th.FloatTensor(np.array(_rewards).reshape(self.batch_size, seq_len, -1)).to(self.device)
-            _next_observations = th.FloatTensor(np.array(_next_observations).reshape(self.batch_size, seq_len, -1)).to(self.device)
-            _dones = th.FloatTensor(np.array(_dones).reshape(self.batch_size, seq_len, -1)).to(self.device)
+                _observations.append(samples[i][0])
+                _actions.append(samples[i][1])
+                _rewards.append(samples[i][2])
+                _next_observations.append(samples[i][3])
+                _dones.append(samples[i][4])
+            rospy.logwarn(f"[DRQN] observations : {np.array(_observations).shape}, {np.array(_actions).reshape(self.batch_size,1,-1).shape},{np.array(_rewards).reshape(self.batch_size,1,-1).shape}, {np.array(_next_observations).shape}, {np.array(_dones).reshape(self.batch_size, 1, -1).shape}")
+            _observations = th.FloatTensor(np.array(_observations)).to(self.device)
+            _actions = th.LongTensor(np.array(_actions).reshape(self.batch_size, 1, -1)).to(self.device)
+            _rewards = th.FloatTensor(np.array(_rewards).reshape(self.batch_size, 1, -1)).to(self.device)
+            _next_observations = th.FloatTensor(np.array(_next_observations)).to(self.device)
+            _dones = th.FloatTensor(np.array(_dones).reshape(self.batch_size, 1, -1)).to(self.device)
             
             with th.no_grad():
                 # Compute the next Q-values using the target network
-                h_target, c_target = self.q_net_target.get_lstm_states(batch_size=self.batch_size)
-                next_q_values, _, _ = self.q_net_target(_next_observations, (h_target, c_target))
-                next_q_values = next_q_values.max(dim=1).reshape(-1, 1)
+                h_target, c_target = self.policy.q_net_target.get_lstm_states(batch_size=self.batch_size)
+                next_q_values, _ = self.policy.q_net_target(_next_observations, (h_target, c_target))
+                rospy.logwarn(f"[DRQN] next_q_values : {next_q_values.shape}")
+                next_q_values = next_q_values.max(dim=1)[0].reshape(-1, 1)
+                rospy.logwarn(f"[DRQN] next_q_values : {next_q_values.shape}")
                 target_q_values = _rewards + (1 - _dones) * self.gamma * next_q_values
+                rospy.logwarn(f"[DRQN] target_q_values : {target_q_values.shape}")
             
             # Get current Q-values estimates
-            h, c = self.q_net.get_lstm_states(batch_size=self.batch_size)
-            current_q_values, _, _ = self.q_net(_observations, h, c)
+            h, c = self.policy.q_net.get_lstm_states(batch_size=self.batch_size)
+            current_q_values, _ = self.policy.q_net(_observations, (h, c))
+            rospy.logwarn(f"[DRQN] current_q_values : {current_q_values.shape}, {target_q_values.shape}")
             current_q_values = th.gather(current_q_values, dim=1, index=_actions.long())
-
+            rospy.logwarn(f"[DRQN] current_q_values : {current_q_values.shape}, {target_q_values.shape}")
+            
             # Compute Huber loss (less sensitive to outliers)
             loss = F.smooth_l1_loss(current_q_values, target_q_values)
             losses.append(loss.item())
@@ -213,9 +222,9 @@ class DRQN(DQN):
             
         # Increase update counter
         self._n_updates += gradient_steps
-
-        self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
-        self.logger.record("train/loss", np.mean(losses))
+        self.losses = np.mean(losses)
+        
+        rospy.logwarn("[DRQN] update loss to tensorboard")
 
     def _sample_action(
         self,
@@ -227,14 +236,14 @@ class DRQN(DQN):
         if self.num_timesteps < learning_starts and not (self.use_sde and self.use_sde_at_warmup):
             # Warmup phase
             unscaled_action = np.array([self.action_space.sample() for _ in range(n_envs)])
-            # print("[DRQN] warmup phase unscale_action : ", unscaled_action, ",type : ", type(unscaled_action))
         else:
             # Note: when using continuous actions,
             # we assume that the policy uses tanh to scale the action
             # We use non-deterministic action in the case of SAC, for TD3, it does not matter
             assert self._last_obs is not None, "self._last_obs was not set"
+            rospy.logwarn(f"[DRQN] _sample_action _last_obs shape: {self._last_obs.shape}, lstm_states: {self.lstm_states.hidden_state[0].shape}, {self.lstm_states.hidden_state[1].shape}")
             unscaled_action, self.lstm_states = self.predict(self._last_obs, state=self.lstm_states.hidden_state, deterministic=False)
-            # print("[DRQN] predict unscale_action : ", unscaled_action, ",type : ", type(unscaled_action))
+            rospy.logwarn(f"[DRQN] _sample_action after predict unscaled_action shape: {unscaled_action.shape}, lstm_states shape: ({self.lstm_states.hidden_state[0].shape}, {self.lstm_states.hidden_state[1].shape})")
 
         # Rescale the action from [low, high] to [-1, 1]
         if isinstance(self.action_space, spaces.Box):
@@ -253,13 +262,36 @@ class DRQN(DQN):
             action = buffer_action
         return action, buffer_action
     
+    def _dump_logs(self) -> None:
+        """
+        Write log.
+        """
+        assert self.ep_info_buffer is not None
+        assert self.ep_success_buffer is not None
+
+        time_elapsed = max((time.time_ns() - self.start_time) / 1e9, sys.float_info.epsilon)
+        fps = int((self.num_timesteps - self._num_timesteps_at_start) / time_elapsed)
+        self.logger.record("time/episodes", self._episode_num)
+        if len(self.ep_info_buffer) > 0 and len(self.ep_info_buffer[0]) > 0:
+            self.logger.record("rollout/ep_rew_mean", safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]))
+            self.logger.record("rollout/ep_len_mean", safe_mean([ep_info["l"] for ep_info in self.ep_info_buffer]))
+        self.logger.record("time/fps", fps)
+        self.logger.record("time/time_elapsed", int(time_elapsed))
+        self.logger.record("time/total_timesteps", self.num_timesteps)
+        self.logger.record("train/n_updates", self._n_updates)
+        self.logger.record("train/loss", self.losses)
+        if len(self.ep_success_buffer) > 0:
+            self.logger.record("rollout/success_rate", safe_n_mean(self.ep_success_buffer, 100))
+        # Pass the number of timesteps for tensorboard
+        self.logger.dump(step=self.num_timesteps)
+
     def _store_transition(
         self,
         replay_buffer: RecurrentReplayBuffer,
         buffer_action: np.ndarray,
         new_obs: np.ndarray,
         reward: np.ndarray,
-        done: np.ndarray,
+        dones: np.ndarray,
         infos: list,
     ) -> None:
         """
@@ -267,27 +299,49 @@ class DRQN(DQN):
         """
         # Store only the unnormalized version
         if self._vec_normalize_env is not None:
+            # new_obs_ = self._vec_normalize_env.unnormalize_obs(new_obs)
             new_obs_ = self._vec_normalize_env.unnormalize_obs(new_obs)
+            reward_ = self._vec_normalize_env.unnormalize_reward(reward)
         else:
-            new_obs_ = new_obs
-
+            # new_obs_ = new_obs
+            # Avoid changeing the original ones
+            new_obs_, reward_ = new_obs, reward
+        
+        # Avoid modification by reference
+        next_obs = deepcopy(new_obs_)
+        # As the VecEnv resets automatically, new_obs is already the
+        # first observation of the next episode
+        for i, done in enumerate(dones):
+            if done and infos[i].get("terminal_observation") is not None:
+                if isinstance(next_obs, dict):
+                    next_obs_ = infos[i]["terminal_observation"]
+                    # VecNormalize normalizes the terminal observation
+                    if self._vec_normalize_env is not None:
+                        next_obs_ = self._vec_normalize_env.unnormalize_obs(next_obs_)
+                    # Replace next obs for the correct envs
+                    for key in next_obs.keys():
+                        next_obs[key][i] = next_obs_[key]
+                else:
+                    next_obs[i] = infos[i]["terminal_observation"]
+                    # VecNormalize normalizes the terminal observation
+                    if self._vec_normalize_env is not None:
+                        next_obs[i] = self._vec_normalize_env.unnormalize_obs(next_obs[i, :])
         # Initialize lstm_states if they are None
         if self.lstm_states is None:
-            self.lstm_states = self.policy.get_lstm_states(batch_size=1)
+            self.lstm_states = self.policy.get_lstm_states(batch_size=self.batch_size)
         # Store the transition in the replay buffer
         replay_buffer.add(
             self._last_obs,
             new_obs_,
             buffer_action,
-            reward,
-            done,
+            reward_,
+            dones,
             infos
         )
 
         # Update the last observation
         self._last_obs = new_obs
-        _, self.lstm_states = self.policy.forward(th.as_tensor(new_obs).float().to(self.device), self.lstm_states)
-    
+
     def collect_rollouts(
         self,
         env: VecEnv,

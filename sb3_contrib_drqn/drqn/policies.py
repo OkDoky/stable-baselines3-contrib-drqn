@@ -1,7 +1,8 @@
 import torch as th
 import torch.nn as nn
 from typing import Optional, Tuple, Type, Dict, Any, Callable, List, Union
-
+import rospy
+import traceback
 from gymnasium import spaces
 from stable_baselines3.dqn.policies import DQNPolicy
 from stable_baselines3.common.type_aliases import Schedule, PyTorchObs
@@ -46,7 +47,7 @@ class RecurrentQNetwork(BasePolicy):
         if features_extractor_class is not None:
             self.features_extractor = features_extractor_class(observation_space, **features_extractor_kwargs).to(self.device)
             self.features_dim = self.features_extractor.features_dim
-            # print("[RecurrentQNetWork] featrues dim : ", self.features_dim)
+            # rospy.logwarn("[RecurrentQNetWork] featrues dim : ", self.features_dim)
         else:
             self.features_dim = observation_space
 
@@ -55,6 +56,7 @@ class RecurrentQNetwork(BasePolicy):
                             hidden_size=self.lstm_hidden_size, 
                             num_layers=self.n_lstm_layers, 
                             batch_first=True)
+        rospy.logwarn("[Policy] lstm is : %s"%self.lstm)
 
         # Define the rest of the Q-network
         self.fc = nn.Sequential(
@@ -64,15 +66,17 @@ class RecurrentQNetwork(BasePolicy):
         )
 
     def forward(self, obs: th.Tensor, lstm_states: Tuple[th.Tensor, th.Tensor]) -> Tuple[th.Tensor, Tuple[th.Tensor, th.Tensor]]:
-        # # obs: (batch_size, seq_len, input_dim)
-        # if self.features_extractor is not None:
-        #     print("[RecurrentQNetWork] before extractor obs shape :", obs.shape)
-        #     obs = self.features_extractor(obs)
-        #     print("[RecurrentQNetWork] after extractor obs shape :", obs.shape)
-        # print("[RecurrentQNetWork] obs shape :", obs.shape, ", lstm state : ", lstm_states[0].shape, lstm_states[1].shape)
-        lstm_out, lstm_states = self.lstm(obs, lstm_states)
-        q_values = self.fc(lstm_out)
-        return q_values, lstm_states
+        try:
+            rospy.logwarn(f"[RecurrentQNetwork] obs : {obs.shape}")
+            obs = self.extract_features(obs, self.features_extractor)
+            obs = obs.view(obs.size(0), -1, self.features_dim)  # Reshape to (batch, seq, input size)
+            rospy.logwarn(f"[RecurrentQNetwork] after reshape obs : {obs.shape}, lstm : ({lstm_states[0].shape}, {lstm_states[1].shape})")
+            lstm_out, lstm_states = self.lstm(obs, lstm_states)
+            q_values = self.fc(lstm_out)
+            return q_values, lstm_states
+        except ValueError:
+            rospy.logerr("[RecurrentQNetWork] %s"%traceback.format_exc())
+            return None, lstm_states
 
     def _predict(self, obs: th.Tensor, lstm_states: Tuple[th.Tensor, th.Tensor], deterministic: bool = True) -> th.Tensor:
         q_values, _ = self.forward(obs, lstm_states)
@@ -114,6 +118,8 @@ class RecurrentDQNPolicy(DQNPolicy):
         self.features_extractor = features_extractor_class(observation_space, **features_extractor_kwargs).to(self.device)
         self.features_dim = self.features_extractor.features_dim
 
+        rospy.logerr("[RecurrentDQNPolicy] lstm hidden size : %s, n lstm layers : %s, features dim : %s"%(lstm_hidden_size, n_lstm_layers, self.features_dim))
+
         # Define the Recurrent Q-network
         self.q_net = RecurrentQNetwork(
             observation_space, 
@@ -135,14 +141,15 @@ class RecurrentDQNPolicy(DQNPolicy):
         )
 
     def forward(self, obs: th.Tensor, lstm_states: RNNStates) -> Tuple[th.Tensor, RNNStates]:
-        # print("[RecurrentDQNPOlicy] obs : ", obs.shape)
-        features = self.extract_features(obs, self.features_extractor)
-        # print("[RecurrentDQNPOlicy] after extractor obs : ", obs.shape)
-        features = features.unsqueeze(0)  # Add batch dimension for LSTM
-
-        q_values, (h_n, c_n) = self.q_net(features, lstm_states.hidden_state)
+        # features = obs.unsqueeze(0)  # Add batch dimension for LSTM
+        # features = self.extract_features(obs, self.features_extractor)
+        # features = features.view(1, features.size(0), -1)
+        # rospy.logwarn(f"[RecurrentDQNPolicy] before forward obs shape : {features.shape}, hidden_state shape: ({lstm_states.hidden_state[0].shape}, {lstm_states.hidden_state[1].shape})")
+        
+        q_values, (h_n, c_n) = self.q_net(obs, lstm_states.hidden_state)
         q_values = q_values.squeeze(0)  # Remove batch dimension
-
+        rospy.logwarn(f"[RecurrentDQNPolicy] after forward q_values shape: {q_values.shape}, hidden_state shape: ({h_n.shape}, {c_n.shape})")
+        
         return q_values, RNNStates(hidden_state=(h_n, c_n))
 
     def _predict(self, obs: th.Tensor, lstm_states: RNNStates, deterministic: bool = True) -> th.Tensor:
