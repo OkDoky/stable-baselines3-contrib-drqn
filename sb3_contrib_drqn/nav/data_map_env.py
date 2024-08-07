@@ -57,7 +57,7 @@ class DataMapEnv(gym.Env):
         self.mean_reward[0] += reward
         
         if done:
-            rospy.logwarn("[%s Env] step : %d"%(self.ns, self._steps_current_episode))
+            rospy.logwarn("[%s Env] (step : %d), (reward : %f)"%(self.ns, self._steps_current_episode, reward))
             if sum(self.result_history) >= self.log_history_lenght:
                 mean_reward = self.mean_reward[0] / self.mean_reward[1]
                 diff = round(mean_reward - self.last_mean_reward, 3)

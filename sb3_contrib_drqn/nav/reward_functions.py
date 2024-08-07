@@ -52,8 +52,8 @@ class RewardHandler:
         obs = obs.astype(int)
         if np.any(np.bitwise_and(obs, mask) == mask):
             reward = self.config.reward_panalty.collision
-            rospy.logwarn("[CollisionCheck] collision, done")
-            return reward, True, {"result_condition": ResultCondition.COLLISION}
+            rospy.logwarn("[RewardHandler] collision, done")
+            return reward, True, {"result_condition": ResultCondition.COLLISION, "is_success": False}
         return reward, False, {}
 
     def step_count(self, obs):
@@ -68,17 +68,19 @@ class RewardHandler:
         if not len(goal_indices[0]):
             return reward, False, {}
         cell_dist = math.hypot(goal_indices[0] - self.center[0], goal_indices[1] - self.center[1])
-        self.current_cell_dist = cell_dist
         if cell_dist < self.config.data_map_infos.goal_threshold:
             reward = self.config.reward_panalty.goal
-            return reward, True, {"result_condition": ResultCondition.SUCCESS}
+            rospy.logwarn("[RewardHandler] goal reached, done")
+            return reward, True, {"result_condition": ResultCondition.SUCCESS, "is_success": True}
         return reward, False, {}
     
     def approach_goal(self, obs):
         reward = 0.0
-        if self.current_cell_dist < self.last_cell_dist:
-            reward = self.last_cell_dist - self.current_cell_dist
-        self.last_cell_dist = copy.copy(self.current_cell_dist)
+        mask = get_mask([self.path_value])
+        obs = obs.astype(int)
+        cell_dist = np.sum(np.bitwise_and(obs, mask) == mask)
+        reward = round((self.last_cell_dist - cell_dist) * self.config.data_map_infos.map_resolution, 2)
+        self.last_cell_dist = cell_dist
         return reward, False, {}
 
     def safety_check(self, obs):

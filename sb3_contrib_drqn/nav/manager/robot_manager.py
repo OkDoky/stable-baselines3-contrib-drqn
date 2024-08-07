@@ -48,7 +48,7 @@ class RobotManager:
 
 
     def generateSpawnAndGoalPose(self, forbidden_zone):
-        safety_radius = self.robot_radius + Config.RobotConfig.RobotSafeDist
+        safety_radius = self.robot_radius + Config.RobotConfig.RobotSafeDist  ## r + 0.2(safe dist)
         spawn_pose = self.getRandomPose(safety_radius, forbidden_zone)
         goal_pose = self.getRandomPose(safety_radius, [*forbidden_zone, spawn_pose])
         return Pose2D(*spawn_pose), Pose2D(*goal_pose)
@@ -95,9 +95,9 @@ class RobotManager:
             req.pose = PoseStamped2Pose2D(pos)
             res = self.clients["move_robot"].call(req)
         if res.success:
-            rospy.logwarn("[RobotManager] success to move robot.. try to get new plan")
+            rospy.logdebug("[RobotManager] success to move robot.. try to get new plan")
         else:
-            rospy.logwarn("[RobotManager] failed to move robot.., try move robot again..")
+            rospy.logerr("[RobotManager] failed to move robot.., try move robot again..")
             self.moveRobot(pos)
 
     def setGoal(self, start: Point, goal: Point):
@@ -111,6 +111,9 @@ class RobotManager:
         req.start = start
         req.goal = goal
         res = self.clients["get_plan"].call(req)
+        if not len(res.path.poses):
+            rospy.logwarn("[RobotManager] Fail to set path.., start : %s, goal : %s"%(start, goal))
+            self.setGoal(start, goal)
         self.pubs["path"].publish(res.path)
 
     def resetCallback(self, req):

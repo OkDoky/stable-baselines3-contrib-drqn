@@ -104,11 +104,11 @@ class SimulatorHandler:
             obs = self.data_map.pop()
             return obs
         except IndexError:
-            # rospy.logwarn("[SimulatorHandler] dm queue is empty..")
-            return np.zeros((200, 200))
+            rospy.logdebug("[SimulatorHandler] dm queue is empty..")
+            return np.zeros([200, 200])
         except Exception:
             rospy.logwarn("[SimulatorHandler] some exception, %s"%traceback.format_exc())
-            return np.zeros((200, 200))
+            return np.zeros([200, 200])
     
     def get_reward(self, obs):
         return self.rh.get_rewards(obs)

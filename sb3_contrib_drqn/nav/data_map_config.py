@@ -9,9 +9,9 @@ class DMConfig:
         goal = 5  ## 2^5
         
         map_resolution = 0.05
-        goal_threshold = int(0.2 / map_resolution)
+        goal_threshold = int(0.5 / map_resolution)
         
     class reward_panalty:
-        collision = -10
-        goal = 10
+        collision = -30
+        goal = 30
         step = -0.1
