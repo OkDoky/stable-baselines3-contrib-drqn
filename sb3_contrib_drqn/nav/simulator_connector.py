@@ -49,11 +49,14 @@ class SimulatorHandler:
         # publisher for action
         self.pubs = {}
         self.pubs["cmd_vel"] = rospy.Publisher("%s/cmd_vel"%ns, Twist, queue_size=1)
+        self.pubs["step_world"] = rospy.Publisher("%s/step_world"%ns, StepWorld, queue_size=1)
+
+        self.step_msg = StepWorld()
+        self.step_msg.required_time = float(rospy.get_param("step_time", 0.1))
 
         # for step world
-        self.step_time = rospy.get_param("step_time", 0.1)
-        self.clients = {}
-        self.clients["step_world"] = rospy.ServiceProxy("%s/step_world"%ns, Empty, persistent=True)
+        # self.clients = {}
+        # self.clients["step_world"] = rospy.ServiceProxy("%s/step_world"%ns, Empty, persistent=True)
         
         # variables
         self.lin_acc = 0.2
@@ -134,4 +137,6 @@ class SimulatorHandler:
         self.rh.reset_rewards()
     
     def step_world(self):
-        self.clients["step_world"]()
+        # self.clients["step_world"]()
+
+        self.pubs["step_world"].publish(self.step_msg)
