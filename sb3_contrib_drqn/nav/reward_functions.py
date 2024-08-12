@@ -79,7 +79,7 @@ class RewardHandler:
         mask = get_mask([self.path_value])
         obs = obs.astype(int)
         cell_dist = np.sum(np.bitwise_and(obs, mask) == mask)
-        reward = round((self.last_cell_dist - cell_dist) * self.config.data_map_infos.map_resolution, 2)
+        reward = round((self.last_cell_dist - cell_dist) * self.config.data_map_infos.map_resolution, 2) * 10
         self.last_cell_dist = cell_dist
         return reward, False, {}
 
