@@ -45,12 +45,11 @@ class RobotManager:
         if test_mode:
             rospy.Service("%s/reset_robot"%ns, Empty, self.resetCallback)
 
-
-
     def generateSpawnAndGoalPose(self, forbidden_zone):
         safety_radius = self.robot_radius + Config.RobotConfig.RobotSafeDist  ## r + 0.2(safe dist)
         spawn_pose = self.getRandomPose(safety_radius, forbidden_zone)
-        goal_pose = self.getRandomPose(safety_radius, [*forbidden_zone, spawn_pose])
+        spawn_safety_pose = (spawn_pose[0], spawn_pose[1], 0.7) ## at least 0.7m between start and goal position needed
+        goal_pose = self.getRandomPose(safety_radius, [*forbidden_zone, spawn_safety_pose])
         return Pose2D(*spawn_pose), Pose2D(*goal_pose)
 
     def getRandomPose(self, safety_radius, forbidden_zone):
