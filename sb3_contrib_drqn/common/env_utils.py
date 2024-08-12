@@ -1,8 +1,11 @@
+import os
 from typing import Union, Callable, Optional, Dict, Type, Any
 import gymnasium as gym
 import rospy
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv
+from stable_baselines3.common.vec_env.patch_gym import _patch_env
+
 
 def make_vec_env(
     env_id: Union[str, Callable[..., gym.Env]],
