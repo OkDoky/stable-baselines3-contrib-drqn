@@ -39,7 +39,7 @@ class Q_net(nn.Module):
         self.hidden_space = hidden_space
         
         ## data map conv..
-        # conv equation. (W - F + 2P) / S + 1 ( W : input size, F : kernel size, P : padding size, S : stride)
+        # conv equation. (W - F + 2P) / S + 1 ( W : input size, F : kernel size, P : stride)
         self.conv1 = nn.Conv2d(self.input_dim, 16, kernel_size=4, stride=4)  # [N, 1, 200, 200] -> [N, 16, 50, 50]
         self.conv2 = nn.Conv2d(16, 32, kernel_size=5, stride=3)  # [N, 16, 50, 50] -> [N, 32, 16, 16]
         self.conv3 = nn.Conv2d(32, 64, kernel_size=4, stride=2)  # [N, 32, 16, 16] -> [N, 64, 7, 7]
@@ -77,7 +77,7 @@ class Q_net(nn.Module):
         # rospy.logwarn(f"[Forward] after flatten x : {x.shape}")
         x = F.relu(self.fc1(x))
         # rospy.logwarn(f"[Forward] after first linear x : {x.shape}")
-        # # x = x.unsqueeze(1)  # (batch_size, seq_len, input_size)
+        # x = x.unsqueeze(1)  # (batch_size, seq_len, input_size)
         # rospy.logwarn(f"[QNettargets] before lstm x : {x.shape}, h : {h.shape}, c : {c.shape}")
         x, (new_h, new_c) = self.lstm(x, (h,c))
         # rospy.logwarn(f"[QNettargets] x : {x.shape}, new_h : {new_h.shape}, new_c : {new_c.shape}")
@@ -96,9 +96,11 @@ class Q_net(nn.Module):
 
         assert training is not None, "training step parameter should be dtermined"
         if training:
-            return torch.zeros([1, batch_size, self.hidden_space]), torch.zeros([1, batch_size, self.hidden_space])
+            return (torch.zeros([1, batch_size, self.hidden_space]), 
+                    torch.zeros([1, batch_size, self.hidden_space]))
         else:
-            return torch.zeros([1, 1, self.hidden_space]), torch.zeros([1, 1, self.hidden_space])
+            return (torch.zeros([1, 1, self.hidden_space]), 
+                    torch.zeros([1, 1, self.hidden_space]))
 
 class EpisodeMemory():
     """Episode memory for recurrent agent"""
@@ -267,7 +269,7 @@ def seed_torch(seed):
             torch.backends.cudnn.benchmark = False
             torch.backends.cudnn.deterministic = True
 
-def save_model(model, path='default.pth'):
+def save_model(model, path='weights/default.pth'):
         torch.save(model.state_dict(), path)
 
 if __name__ == "__main__":
@@ -285,8 +287,7 @@ if __name__ == "__main__":
         "render_mode": "rgb_array",
     }
     # Set gym environment
-    # env = make_vec_env(env_name, n_envs=n_envs, env_kwargs=env_kwargs)
-    env = gym.make(env_name, ns="r1", **env_kwargs)
+    envs = make_vec_env(env_name, n_envs=n_envs, env_kwargs=env_kwargs)
 
     
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -295,7 +296,6 @@ if __name__ == "__main__":
     np.random.seed(seed)
     random.seed(seed)
     seed_torch(seed)
-    # env.seed(seed)
 
     # default `log_dir` is "runs" - we'll be more specific here
     writer = SummaryWriter('tb_logs/'+env_name+"_"+model_name+"_"+exp_num)
@@ -303,11 +303,10 @@ if __name__ == "__main__":
     # Set parameters
     batch_size = 8
     learning_rate = 1e-3
-    buffer_len = int(100000)
     min_epi_num = 8 # Start moment to train the Q network
-    episodes = 1000
+    episodes = 50000
     print_per_iter = 20
-    target_update_period = 4
+    target_update_period = 64
     eps_start = 0.1
     eps_end = 0.001
     eps_decay = 0.995
@@ -323,10 +322,10 @@ if __name__ == "__main__":
     
 
     # Create Q functions
-    Q = Q_net(state_space=env.observation_space.shape[0], 
-              action_space=env.action_space.n).to(device)
-    Q_target = Q_net(state_space=env.observation_space.shape[0], 
-                     action_space=env.action_space.n).to(device)
+    Q = Q_net(state_space=envs.observation_space.shape[0], 
+              action_space=envs.action_space.n).to(device)
+    Q_target = Q_net(state_space=envs.observation_space.shape[0], 
+                     action_space=envs.action_space.n).to(device)
 
     Q_target.load_state_dict(Q.state_dict())
 
@@ -341,69 +340,75 @@ if __name__ == "__main__":
                                    max_epi_num=1000, max_epi_len=max_epi_len, 
                                    batch_size=batch_size, 
                                    lookup_step=lookup_step)
-    success_buffer = collections.deque(maxlen=20)
+    success_buffer = collections.deque(maxlen=10)
 
     # Train
     epi_count = 0
     total_steps = 0
+
+    obs = envs.reset()
+    dones = [False for _ in range(n_envs)]
+    episode_record = [EpisodeBuffer() for _ in range(n_envs)]
+    h, c = Q.init_hidden_state(batch_size=n_envs, training=True)
+    epi_step = [0 for _ in range(n_envs)]
+
     while epi_count < episodes:
-    # for i in range(episodes):
-        s, _ = env.reset()
-        obs = s # Use only Position of Cart and Pole
-        done = False
-        episode_record = EpisodeBuffer()
-        h, c = Q.init_hidden_state(batch_size=batch_size, training=False)
-
         ## for junk episode..
-        epi_step = 0
-        for t in range(max_step):
+        
 
-            # Get action
-            try:
-                a, h, c = Q.sample_action(torch.from_numpy(obs).unsqueeze(0).unsqueeze(0).float().to(device), 
-                                              h.to(device), c.to(device),
-                                              epsilon)
-            except Exception as e:
-                rospy.logerr("[DRQN] %s"%traceback.format_exc())
-            # Do action
-            s_prime, r, done, _, info = env.step(a)
-            obs_prime = s_prime
-            total_steps += 1
+        ##################################################################
+        obs_tensor = torch.FloatTensor(obs).to(device)
+        actions = []
+        for i in range(n_envs):
+            a, h[:, i:i+1,:], c[:, i:i+1,:] = Q.sample_action(
+                obs_tensor[i].unsqueeze(0).unsqueeze(0).float().to(device),
+                h[:, i:i+1,:].to(device), 
+                c[:, i:i+1,:].to(device),
+                epsilon)
+            actions.append(a)
+        actions = np.array(actions)
 
-            # make data
-            done_mask = 0.0 if done else 1.0
+        next_obs, rewards, dones, infos = envs.step(actions)
+        total_steps += n_envs
 
-            episode_record.put([obs, a, r/100.0, obs_prime, done_mask])
+        # make data
+        done_masks = [0.0 if d else 1.0 for d in dones]
 
-            obs = obs_prime
-            
-            score += r
-            score_sum += r
+        for i in range(n_envs):
+            episode_record[i].put([obs[i], actions[i], rewards[i]/100.0, next_obs[i], done_masks[i]])
+            epi_step[i] += 1
 
-            epi_step += 1
+        obs = next_obs
+        score += np.mean(rewards)
+        score_sum += np.mean(rewards)
 
-            if len(episode_memory) >= min_epi_num:
-                train(Q, Q_target, episode_memory, device, 
-                        optimizer=optimizer,
-                        batch_size=batch_size,
-                        learning_rate=learning_rate,
-                        writer=writer,
-                        total_steps=total_steps)
+        if len(episode_memory) >= min_epi_num:
+            train(Q, Q_target, episode_memory, device, 
+                    optimizer=optimizer,
+                    batch_size=batch_size,
+                    learning_rate=learning_rate,
+                    writer=writer,
+                    total_steps=total_steps)
 
-                if (t+1) % target_update_period == 0:
-                    # Q_target.load_state_dict(Q.state_dict()) <- navie update
-                    for target_param, local_param in zip(Q_target.parameters(), Q.parameters()): # <- soft update
-                            target_param.data.copy_(tau*local_param.data + (1.0 - tau)*target_param.data)
-                
-            if done:
-                success_buffer.append(info['is_success'])
-                break
-        epi_count += 1 
-        if epi_count % 10 == 0:
-            success_rate = success_buffer.count(1) / len(success_buffer)
-            success_buffer.clear()
-            writer.add_scalar("train/success_rate", success_rate, epi_count)
-        episode_memory.put(episode_record)
+            if (total_steps+1) % target_update_period == 0:
+                # Q_target.load_state_dict(Q.state_dict()) <- navie update
+                for target_param, local_param in zip(Q_target.parameters(), Q.parameters()): # <- soft update
+                        target_param.data.copy_(tau*local_param.data + (1.0 - tau)*target_param.data)
+
+        if any(dones):
+            for i, done in enumerate(dones):
+                if done:
+                    success_buffer.append(infos[i]['is_success'])
+        
+        ###############################################################
+
+                    epi_count += 1 
+                    if epi_count % 10 == 0:
+                        success_rate = success_buffer.count(1) / len(success_buffer)
+                        success_buffer.clear()
+                        writer.add_scalar("train/success_rate", success_rate, epi_count)
+        for i in range(n_envs):
+            episode_memory.put(episode_record[i])
         
         epsilon = max(eps_end, epsilon * eps_decay) #Linear annealing
 
@@ -411,11 +416,11 @@ if __name__ == "__main__":
             print("n_episode :{}, score : {:.1f}, n_buffer : {}, eps : {:.1f}%".format(
                                                             epi_count, score_sum/print_per_iter, len(episode_memory), epsilon*100))
             score_sum=0.0
-            save_model(Q, model_name+"_"+exp_num+'.pth')
+            save_model(Q, "weights/"+model_name+"_"+exp_num+"_"+str(epi_count)+'.pth')
 
         # Log the reward
         writer.add_scalar('Rewards per episodes', score, epi_count)  ## every episode
         score = 0
         
     writer.close()
-    env.close()
+    envs.close()
